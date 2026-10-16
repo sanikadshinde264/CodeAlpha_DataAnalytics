@@ -94,7 +94,7 @@ Open the `sentiment_outputs/` folder.
 - 🎭 Strongest emotions: **trust (23%), joy (22%), anticipation (19%)**
 - 📉 Sentiment trend: **stable**, with the positive share moving only +0.6 points between the first and second half of the period
 
-📄 Full details are in [KEY_FINDINGS.md](KEY_FINDINGS.md).
+📄 Full details are in [key_insights.md](KEY_FINDINGS.md).
 
 ## 💡 Recommendations
 
