@@ -5,19 +5,20 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.gridspec import GridSpec
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, ENGLISH_STOP_WORDS
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # ------------------------------------------------------------------ CONFIG
-DATA_PATH = "reviews.csv"
+DATA_PATH = "Reviews.csv"
+MAX_ROWS = 20000                             # random sample size for big files (None = use everything)
 OUT_DIR = "sentiment_outputs"
 POS_THRESHOLD, NEG_THRESHOLD = 0.05, -0.05   # standard VADER cut-offs
-MAX_EMOTION_ROWS = 5000                      # NRC scoring is slow, so sample large datasets
+MAX_EMOTION_ROWS = 3000                      # NRC scoring is slow, so sample large datasets
 
-COLS = {
-    "text": "review_text",     # required
-    "rating": "rating",        # 1-5 stars, optional
-    "date": "review_date",     # optional, enables the trend chart
+COLS = {                       # set for the Kaggle "Amazon Fine Food Reviews" Reviews.csv
+    "text": "Text",            # required
+    "rating": "Score",         # 1-5 stars, optional
+    "date": "Time",            # optional, enables the trend chart (Unix timestamps are handled)
 }
 # ---------------------------------------------------------------------------
 
@@ -63,7 +64,7 @@ def make_demo_data(n=400, seed=7):
 DEMO = not os.path.exists(DATA_PATH)
 if not DEMO:
     df = pd.read_csv(DATA_PATH)
-    print(f"Loaded {len(df)} rows from {DATA_PATH}")
+    print(f"Loaded {len(df):,} rows from {DATA_PATH}")
 else:
     print(f"'{DATA_PATH}' not found - using generated demo data.")
     df = make_demo_data()
@@ -78,9 +79,15 @@ if not DEMO:
     df = df.drop_duplicates(subset=[T])
 df[T] = df[T].astype(str).str.strip()
 df = df[df[T].str.len() > 0]
+if MAX_ROWS and len(df) > MAX_ROWS:
+    df = df.sample(MAX_ROWS, random_state=42)
+    print(f"Using a random sample of {MAX_ROWS:,} rows")
 if D:
-    df[D] = pd.to_datetime(df[D], errors="coerce")
-print(f"{len(df)} usable texts after cleaning\n")
+    if pd.api.types.is_numeric_dtype(df[D]):
+        df[D] = pd.to_datetime(df[D], unit="s", errors="coerce")   # Unix timestamp
+    else:
+        df[D] = pd.to_datetime(df[D], errors="coerce")
+print(f"{len(df):,} usable texts after cleaning\n")
 
 # ------------------------------------------------------------------ SENTIMENT (VADER)
 analyzer = SentimentIntensityAnalyzer()
@@ -105,7 +112,8 @@ if R:
     print(f"Text sentiment agrees with star rating in {agreement:.1f}% of reviews\n")
 
 # ------------------------------------------------------------------ TOP WORDS
-vec = CountVectorizer(stop_words="english", min_df=2, token_pattern=r"(?u)\b[a-zA-Z]{3,}\b")
+EXTRA_STOP = ["did", "don", "didn", "doesn", "isn", "wasn", "just", "really", "product", "like", "ve", "ll"]
+vec = CountVectorizer(stop_words=list(ENGLISH_STOP_WORDS) + EXTRA_STOP, min_df=2, token_pattern=r"(?u)\b[a-zA-Z]{3,}\b")
 top_pos = top_neg = None
 try:
     X = vec.fit_transform(df[T].str.lower())
@@ -128,13 +136,24 @@ except ValueError:
     print("Not enough text to extract keywords.\n")
 
 # ------------------------------------------------------------------ EMOTIONS (NRC)
+def emotion_scores(text):
+    """Return {emotion: count}. Handles both the old (3.x) and new (4.x) NRCLex interfaces."""
+    try:
+        return NRCLex(text).raw_emotion_scores        # nrclex 3.x
+    except (AttributeError, TypeError):
+        obj = NRCLex()                                # nrclex 4.x
+        obj.load_raw_text(text)
+        return obj.raw_emotion_scores
+
+
 emotions = None
 if HAS_NRC:
     try:
         sample = df[T].sample(min(len(df), MAX_EMOTION_ROWS), random_state=1)
         totals = pd.Series(0.0, index=EMOTIONS)
+        print(f"Scoring emotions for {len(sample):,} texts (this can take a few minutes)...")
         for text in sample:
-            scores = NRCLex(text).raw_emotion_scores
+            scores = emotion_scores(text)
             for e in EMOTIONS:
                 totals[e] += scores.get(e, 0)
         if totals.sum() > 0:
@@ -142,7 +161,8 @@ if HAS_NRC:
             print("=== EMOTION SHARE (%) ===")
             print(emotions.sort_values(ascending=False), "\n")
     except Exception as e:
-        print(f"Emotion detection skipped ({e}). Run: python -m textblob.download_corpora\n")
+        print(f"Emotion detection skipped ({e}).")
+        print("Try: python -m pip install nrclex==3.0.0   then run again.\n")
 else:
     print("NRCLex not installed - skipping emotions. Run: pip install nrclex\n")
 
